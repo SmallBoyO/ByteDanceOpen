@@ -4,13 +4,36 @@
   xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
-  <groupId>com.yyd</groupId>
+  <groupId>com.github.yydzxz</groupId>
   <artifactId>bytedance-open</artifactId>
-  <version>1.9-SNAPSHOT</version>
+  <version>1.0.2.RELEASE</version>
 
   <name>ByteDance - Open Java SDK</name>
-  <!-- FIXME change it to the project's website -->
-  <url>http://www.example.com</url>
+  <description>字节跳动开放平台Java SDK</description>
+  <url>https://github.com/yydzxz/ByteDanceOpen</url>
+
+  <developers>
+    <developer>
+      <name>yangyidian</name>
+      <email>79861784@qq.com</email>
+      <url>https://github.com/yydzxz</url>
+    </developer>
+  </developers>
+
+  <scm>
+    <connection>scm:git:https://github.com/yydzxz/ByteDanceOpen.git</connection>
+    <developerConnection>scm:https://github.com/yydzxz</developerConnection>
+    <url>https://github.com/yydzxz/ByteDanceOpen</url>
+  </scm>
+
+  <licenses>
+    <license>
+      <name>Apache License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+      <distribution>repo</distribution>
+      <comments>license</comments>
+    </license>
+  </licenses>
 
   <properties>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -101,4 +124,95 @@
       </plugins>
     </pluginManagement>
   </build>
+  <profiles>
+    <profile>
+      <id>sonatype-oss-release</id>
+      <build>
+        <plugins>
+          <!-- Source -->
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-source-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>attach-sources</id>
+                <goals>
+                  <goal>jar</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+          <!-- Javadoc -->
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-javadoc-plugin</artifactId>
+            <version>3.1.1</version>
+            <configuration>
+              <excludePackageNames>com.facebook.thrift:com.facebook.thrift.*</excludePackageNames>
+            </configuration>
+            <executions>
+              <execution>
+                <id>attach-javadocs</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>jar</goal>
+                </goals>
+                <configuration>
+                  <doclint>none</doclint>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+          <!-- GPG -->
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-gpg-plugin</artifactId>
+            <version>1.6</version>
+            <executions>
+              <execution>
+                <phase>verify</phase>
+                <goals>
+                  <goal>sign</goal>
+                </goals>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+      <distributionManagement>
+        <repository>
+          <id>sonatype-nexus-release</id>
+          <url>https://oss.sonatype.org/service/local/staging/deploy/maven2/</url>
+        </repository>
+        <snapshotRepository>
+          <id>sonatype-nexus-snapshots</id>
+          <url>https://oss.sonatype.org/content/repositories/snapshots/</url>
+        </snapshotRepository>
+      </distributionManagement>
+    </profile>
+
+    <profile>
+      <id>github</id>
+      <repositories>
+        <repository>
+          <id>central</id>
+          <url>https://repo1.maven.org/maven2</url>
+          <releases><enabled>true</enabled></releases>
+          <snapshots><enabled>true</enabled></snapshots>
+        </repository>
+        <repository>
+          <id>github</id>
+          <name>GitHub OWNER Apache Maven Packages</name>
+          <url>https://maven.pkg.github.com/yydzxz/ByteDanceOpen</url>
+        </repository>
+      </repositories>
+      <distributionManagement>
+        <repository>
+          <id>github</id>
+          <name>GitHub OWNER Apache Maven Packages</name>
+          <url>https://maven.pkg.github.com/yydzxz/ByteDanceOpen</url>
+        </repository>
+      </distributionManagement>
+    </profile>
+  </profiles>
 </project>
