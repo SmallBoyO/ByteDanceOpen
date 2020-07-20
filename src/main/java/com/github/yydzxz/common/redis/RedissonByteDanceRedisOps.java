@@ -8,7 +8,6 @@ import org.redisson.api.RedissonClient;
  * @author yangyidian
  * @date 2020/06/23
  **/
-//@Component
 public class RedissonByteDanceRedisOps implements IByteDanceRedisOps {
     private final RedissonClient redissonClient;
 
@@ -48,5 +47,10 @@ public class RedissonByteDanceRedisOps implements IByteDanceRedisOps {
     @Override
     public Lock getLock(String key) {
         return redissonClient.getLock(key);
+    }
+
+    @Override
+    public boolean deleteKey(String key) {
+        return redissonClient.getBucket(key).delete();
     }
 }
