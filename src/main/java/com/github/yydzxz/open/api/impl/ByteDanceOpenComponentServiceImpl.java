@@ -1,8 +1,10 @@
 package com.github.yydzxz.open.api.impl;
 
 import cn.hutool.json.JSONUtil;
+import com.github.yydzxz.common.error.InvalidAuthorizerRefreshToken;
 import com.github.yydzxz.open.api.IByteDanceOpenComponentService;
 import com.github.yydzxz.open.api.IByteDanceOpenConfigStorage;
+import com.github.yydzxz.open.api.IByteDanceOpenMaterialService;
 import com.github.yydzxz.open.api.IByteDanceOpenMiniProgramService;
 import com.github.yydzxz.open.api.IByteDanceOpenService;
 import com.github.yydzxz.open.api.IByteDanceOpenTemplateService;
@@ -14,8 +16,9 @@ import com.github.yydzxz.open.util.ServerVerification;
 import com.github.yydzxz.open.util.URIUtil;
 import com.github.yydzxz.common.error.ByteDanceError;
 import com.github.yydzxz.common.error.ByteDanceErrorException;
-import com.github.yydzxz.common.error.ByteDanceMiniProgramErrorMsgEnum;
+import com.github.yydzxz.common.error.ByteDanceErrorMsgEnum;
 import com.github.yydzxz.open.api.response.auth.GetAuthorizerAccessTokenReponse;
+import com.google.common.collect.Multimap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.Lock;
@@ -39,9 +42,12 @@ public class ByteDanceOpenComponentServiceImpl implements IByteDanceOpenComponen
 
     private IByteDanceOpenTemplateService byteDanceOpenTemplateService;
 
+    private IByteDanceOpenMaterialService byteDanceOpenMaterialService;
+
     public ByteDanceOpenComponentServiceImpl(IByteDanceOpenService byteDanceOpenService) {
         this.byteDanceOpenService = byteDanceOpenService;
         byteDanceOpenTemplateService = new ByteDanceOpenTemplateServiceImpl(byteDanceOpenService);
+        byteDanceOpenMaterialService = new ByteDanceOpenMaterialServiceImpl(byteDanceOpenService);
     }
 
     @Override
@@ -66,7 +72,7 @@ public class ByteDanceOpenComponentServiceImpl implements IByteDanceOpenComponen
             synchronized (BYTEDANCE_OPEN_MINI_PROGRAM_SERVICE_MAP) {
                 byteDanceOpenMiniProgramService = BYTEDANCE_OPEN_MINI_PROGRAM_SERVICE_MAP.get(appId);
                 if (byteDanceOpenMiniProgramService == null) {
-                    byteDanceOpenMiniProgramService = new ByteDanceOpenMiniProgramServiceImpl(this, appId, getOpenConfigStorage().getByteDanceMiniProgramConfig(appId));
+                    byteDanceOpenMiniProgramService = new ByteDanceOpenMiniProgramServiceImpl(this, appId);
                     BYTEDANCE_OPEN_MINI_PROGRAM_SERVICE_MAP.put(appId, byteDanceOpenMiniProgramService);
                 }
             }
@@ -120,6 +126,11 @@ public class ByteDanceOpenComponentServiceImpl implements IByteDanceOpenComponen
     }
 
     @Override
+    public IByteDanceOpenMaterialService getByteDanceOpenMaterialService() {
+        return byteDanceOpenMaterialService;
+    }
+
+    @Override
     public String getPreAuthUrl(String redirectURI){
         return createPreAuthUrl(redirectURI);
     }
@@ -164,23 +175,29 @@ public class ByteDanceOpenComponentServiceImpl implements IByteDanceOpenComponen
         if (!config.isAuthorizerAccessTokenExpired(appId) && !forceRefresh) {
             return config.getAuthorizerAccessToken(appId);
         }
-        Lock lock = config.getByteDanceMiniProgramConfig(appId).getAccessTokenLock();
+        Lock lock = config.getAccessTokenLock(appId);
         lock.lock();
         try {
             if (!config.isAuthorizerAccessTokenExpired(appId) && !forceRefresh) {
                 return config.getAuthorizerAccessToken(appId);
             }
+            String authorizerRefreshToken = getByteDanceOpenConfigStorage().getAuthorizerRefreshToken(appId);
+            if(StringUtils.isEmpty(authorizerRefreshToken)){
+                throw new InvalidAuthorizerRefreshToken("authorizerRefreshToken为空，需要重新授权");
+            }
             String url = API_GET_OAUTH_TOKEN_URL
-                + "?authorizer_refresh_token=" + getByteDanceOpenConfigStorage().getAuthorizerRefreshToken(appId)
+                + "?authorizer_refresh_token=" + authorizerRefreshToken
                 + "&grant_type=app_to_tp_refresh_token";
             GetAuthorizerAccessTokenReponse response = get(url, GetAuthorizerAccessTokenReponse.class);
 
             config.updateAuthorizerAccessToken(appId, response.getAuthorizerAccessToken(), response.getExpiresIn());
             config.setAuthorizerRefreshToken(appId, response.getAuthorizerRefreshToken());
             return config.getAuthorizerAccessToken(appId);
+        } catch (InvalidAuthorizerRefreshToken e){
+            throw e;
         } catch (Exception e){
             log.error(e.getMessage(), e);
-            throw new RuntimeException(appId + "获取 AuthorizerAccessToken 失败");
+            throw new RuntimeException(appId + "获取 AuthorizerAccessToken 失败, 请尝试解绑后重新授权");
         }finally {
             lock.unlock();
         }
@@ -206,35 +223,49 @@ public class ByteDanceOpenComponentServiceImpl implements IByteDanceOpenComponen
 
     @Override
     public <T> T get(String url, Class<T> t) {
-        return retryableExecuteRequest((String url2, Object request2, Class<T> t2) -> {
+        return retryableExecuteRequest(
+            (url2, headers, request2, t2) -> {
                 return getInternal(url2, t2);
-            }, url,null, t);
+            },
+            url,null, null, t);
     }
 
 
     private <T> T getInternal(String url, Class<T> t) {
-        return executeRequest((uriWithCommonParam, request, t2)->{
+        return executeRequest((uriWithCommonParam, headers, request, t2)->{
             return getByteDanceOpenService().getByteDanceHttpRequestService().get(uriWithCommonParam, t2);
-        }, url, null, t);
+        }, url, null, null, t);
     }
 
     @Override
     public <T> T post(String url, Object request, Class<T> t) {
-        return retryableExecuteRequest((url2, request2, t2)->postInternal(url2, request2, t2),
-            url, request, t);
+        return retryableExecuteRequest(
+            (url2, headers, request2, t2) -> postInternal(url2, request2, t2),
+            url, null, request, t);
     }
 
-    private  <T> T postInternal(String url, Object request, Class<T> t) {
-        return executeRequest((uriWithCommonParam, request2, t2)->{
+    private <T> T postInternal(String url, Object request, Class<T> t) {
+        return executeRequest((uriWithCommonParam, headers2, request2, t2)->{
             return getByteDanceOpenService().getByteDanceHttpRequestService().post(uriWithCommonParam, request2, t2);
-        }, url, request, t);
+        }, url, null, request, t);
     }
 
+    @Override
+    public <T> T postWithHeaders(String url, Multimap<String,String> headers, Object request, Class<T> t){
+        return retryableExecuteRequest((url2, headers2, request2, t2) -> postWithHeadersInternal(url2, headers2, request2, t2),
+            url, headers, request, t);
+    }
+
+    private <T> T postWithHeadersInternal(String url, Multimap<String,String> headers, Object request, Class<T> t){
+        return executeRequest((uriWithCommonParam, headers2, request2, t2)->{
+            return getByteDanceOpenService().getByteDanceHttpRequestService().postWithHeaders(uriWithCommonParam, headers2, request2, t2);
+        }, url, headers, request, t);
+    }
 
     @Override
     public boolean shouldRetry(ByteDanceError error) {
         return shouldExpireComponentAccessToken(error)
-            || ByteDanceMiniProgramErrorMsgEnum.CODE_40000.getCode() == error.getErrno();
+            || ByteDanceErrorMsgEnum.CODE_40000.getCode() == error.getErrno();
     }
 
     @Override
@@ -252,12 +283,12 @@ public class ByteDanceOpenComponentServiceImpl implements IByteDanceOpenComponen
      * @param <T>
      * @return
      */
-    private <T> T executeRequest(IExecutable<T> executable, String url, Object request, Class<T> t){
+    private <T> T executeRequest(IExecutable<T> executable, String url, Multimap<String,String> headers, Object request, Class<T> t){
         String componentAccessToken = getComponentAccessToken(false);
         String componentAppId = getByteDanceOpenConfigStorage().getComponentAppId();
         String uriWithCommonParam = url + (url.contains("?") ? "&" : "?") + "component_access_token=" + componentAccessToken + "&component_appid=" + componentAppId;
         try {
-            return executable.execute(uriWithCommonParam, request, t);
+            return executable.execute(uriWithCommonParam, headers, request, t);
         } catch (ByteDanceErrorException e) {
             ByteDanceError error = e.getError();
             /*
@@ -292,7 +323,7 @@ public class ByteDanceOpenComponentServiceImpl implements IByteDanceOpenComponen
      * @return
      */
     private boolean shouldExpireComponentAccessToken(ByteDanceError error){
-        return error.getErrno() == ByteDanceMiniProgramErrorMsgEnum.CODE_40009.getCode()
-            || error.getErrno() == ByteDanceMiniProgramErrorMsgEnum.CODE_40010.getCode();
+        return error.getErrno() == ByteDanceErrorMsgEnum.CODE_40009.getCode()
+            || error.getErrno() == ByteDanceErrorMsgEnum.CODE_40010.getCode();
     }
 }
